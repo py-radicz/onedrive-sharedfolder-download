@@ -15,8 +15,8 @@ Works for:
 from onedrive import OneDrive
 
 # path could be relative to current working directory of script
-# or absolute
-folder = OneDrive(url="https://xxx.zzz", path="Desktop")
+# or absolute (e.g. C:\\Users\\Username\\Desktop, /home/username/Desktop)
+folder = OneDrive(url="https://1drv.ms/f/s!ArwO5iEFDkD1jJNshhRIP-okHCS52g", path="Desktop")
 
 # fire download
 folder.download()
