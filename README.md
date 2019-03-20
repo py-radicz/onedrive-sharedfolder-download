@@ -22,4 +22,7 @@ folder = OneDrive(url="https://xxx.zzz", path="Desktop")
 folder.download()
 ```
 
+### Tips
 
+If you wanna get only direct download link of shared file, just change the top level domain
+of shared link from `.ms` to `.ws` (does not work for shared folder)
