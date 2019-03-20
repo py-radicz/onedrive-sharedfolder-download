@@ -1,6 +1,13 @@
 ### Description
 
-Asynchronously downloads contents of provided OneDrive **shared** folder/file url without authentication
+Asynchronously downloads contents of provided OneDrive **shared** folder/file url without authentication. 
+
+Works for:
+- Linux (tested)
+- Windows (tested)
+- most probably also for MacOS (not tested)
+
+
 
 ### Usage
 
