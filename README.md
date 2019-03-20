@@ -1,3 +1,7 @@
+### Description
+
+Asynchronously downloads contents of provided OneDrive **shared** folder/file url without authentication
+
 ### Usage
 
 ```python
