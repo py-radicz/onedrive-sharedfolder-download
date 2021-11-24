@@ -1,108 +1,73 @@
-import asyncio
-import os
+from itertools import islice
 from base64 import b64encode
-from typing import Optional
+from pathlib import Path
+import httpx
+import trio
+import os
+import io
 
-import aiofiles
-import aiohttp
-from requests import Session
+
+def url_to_id(url: str) -> str:
+    return (
+        b64encode(url.encode()).decode().replace("/", "_").replace("+", "-").rstrip("=")
+    )
 
 
-class OneDrive:
-    """
-    Downloads shared file/folder to localhost with persisted structure.
+def chunks(it: dict[str, str], size: int) -> tuple:
+    it = iter(it)
+    return iter(lambda: tuple(islice(it, size)), ())
 
-    params:
-    `str:url`: url to the shared one drive folder or file
-    `str:path`: local filesystem path
 
-    methods:
-    `download() -> None`: fire async download of all files found in URL
-    """
+class OneDriveSharedFolder:
+    def __init__(self, root_url: str) -> None:
+        self._root_url = root_url
+        self._api = "https://api.onedrive.com/v1.0/shares/u!"
+        self._client = httpx.AsyncClient(timeout=300)
+        self._files = {}
+        self._downloaded_files = 0
 
-    def __init__(self, url: Optional[str] = None, path: Optional[str] = None) -> None:
-        if not (url and path):
-            raise ValueError("URL to shared resource or path to download is missing.")
+    async def _traverse_url(self, url: str, name: str = "") -> None:
+        url = self._api + url_to_id(url) + "/root?expand=children"
+        r = (await self._client.get(url)).json()
+        name = name + os.sep + r.get("name")
 
-        self.url = url
-        data_bytes64 = b64encode(bytes(url, "utf-8"))
-        self.compiled_url = (
-            data_bytes64.decode("utf-8").replace("/", "_").replace("+", "-").rstrip("=")
-        )
-        self.path = path
-        self.prefix = "https://api.onedrive.com/v1.0/shares/u!"
-        self.suffix = "/root?expand=children"
-        self.session = Session()
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-                " (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36"
-            }
-        )
+        if not r.get("children"):
+            path = name.lstrip(os.sep)
+            self._files[path] = r.get("@content.downloadUrl")
 
-    def _token(self, url: str) -> str:
-        return "u!" + b64encode(url.encode()).decode()
-
-    def _traverse_url(self, url: str, name: str = "") -> None:
-        """Traverse the folder tree and store leaf urls with filenames"""
-
-        r = self.session.get(f"{self.prefix}{url}{self.suffix}").json()
-        name = name + os.sep + r["name"]
-
-        # shared file
-        if not r["children"]:
-            file: dict[str, str] = {}
-            file["name"] = name.lstrip(os.sep)
-            file["url"] = r["@content.downloadUrl"]
-            self.to_download.append(file)
-            print(f"Found {file['name']}")
-
-        # shared folder
-        for child in r["children"]:
-            print(child["name"])
+        for child in r.get("children"):
             if "folder" in child:
-                encoded_url = b64encode(bytes(child["webUrl"], "utf-8"))
-                self._traverse_url(
-                    encoded_url.decode("utf-8")
-                    .replace("/", "_")
-                    .replace("+", "-")
-                    .rstrip("="),
-                    name,
-                )
+                await self._traverse_url(child.get("webUrl"), name)
 
             if "file" in child:
-                file = {}
-                file["name"] = (name + os.sep + child["name"]).lstrip(os.sep)
-                file["url"] = child["@content.downloadUrl"]
-                self.to_download.append(file)
-                print(f"Found {file['name']}")
+                path = (name + os.sep + child.get("name")).lstrip(os.sep)
+                self._files[path] = child.get("@content.downloadUrl")
 
-    async def _download_file(
-        self, file: dict[str, str], session: aiohttp.ClientSession
-    ) -> None:
-        async with session.get(file["url"], timeout=None) as r:
-            filename = os.path.join(self.path, file["name"])
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
-            async with aiofiles.open(filename, "wb") as f:
-                async for chunk in r.content.iter_chunked(1024 * 16):
-                    if chunk:
-                        await f.write(chunk)
+    async def _download(self, file: str) -> None:
+        buff = io.BytesIO()
+        async with self._client.stream("GET", self._files.get(file)) as r:
+            async for chunk in r.aiter_bytes():
+                buff.write(chunk)
 
-        self.downloaded += 1
-        progress = int(self.downloaded / len(self.to_download) * 100)
-        print(f"Download progress: {progress}%")
+        p = Path(file)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(buff.getvalue())
+        self._downloaded_files += 1
+        print(
+            f"Download progress: {(self._downloaded_files / len(self._files))*100:.2f}%"
+        )
 
-    async def _downloader(self) -> None:
-        async with aiohttp.ClientSession() as session:
-            await asyncio.wait(
-                [self._download_file(file, session) for file in self.to_download]
-            )
+    def download(self, path: str = ".", concurrent_reqs: int = 5) -> None:
+        async def _runner() -> None:
+            print("Traversing directory tree..")
+            await self._traverse_url(self._root_url)
+            print(f"Found {len(self._files)} files, going to download them..")
 
-    def download(self) -> None:
-        print("Traversing public folder\n")
-        self.to_download: list[dict[str, str]] = []
-        self.downloaded = 0
-        self._traverse_url(self.compiled_url)
+            for chunk in chunks(self._files, concurrent_reqs):
+                async with trio.open_nursery() as n:
+                    for file in chunk:
+                        n.start_soon(self._download, file)
 
-        print("\nStarting async download\n")
-        asyncio.get_event_loop().run_until_complete(self._downloader())
+            await self._client.aclose()
+
+        trio.run(_runner)

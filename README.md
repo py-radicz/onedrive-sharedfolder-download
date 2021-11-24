@@ -2,24 +2,18 @@
 
 Asynchronously downloads contents of provided OneDrive **shared** folder/file url without authentication. 
 
-Works for:
-- Linux (tested)
-- Windows (tested)
-- most probably also for MacOS (not tested)
-
-
-
 ### Usage
 
 ```python
-from onedrive import OneDrive
+from onedrive import OneDriveSharedFolder
 
-# path could be relative to current working directory of script
-# or absolute (e.g. C:\\Users\\Username\\Desktop, /home/username/Desktop)
-folder = OneDrive(url="https://1drv.ms/f/s!ArwO5iEFDkD1jJNshhRIP-okHCS52g", path="Desktop")
+o = OneDriveSharedFolder("https://1drv.ms/u/s!AtZI6E5G7ZC_izG2o7OFNjh2N0Yk?e=hjDg8t")
 
-# fire download
-folder.download()
+# downloads with default path to storage which is CWD and default concurrent requests which is set to 5
+o.download() 
+
+# customize to your liking
+o.download(path='/home/user/Downloads', concurrent_reqs=10)
 ```
 
 ### Tips
