@@ -13,7 +13,7 @@ def url_to_id(url: str) -> str:
     )
 
 
-def chunks(it: dict[str, str], size: int) -> tuple:
+def chunks(it: "dict[str, str]", size: int) -> tuple:
     it = iter(it)
     return iter(lambda: tuple(islice(it, size)), ())
 
